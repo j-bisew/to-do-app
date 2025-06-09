@@ -7,7 +7,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [todos, setTodos] = useState([]);
   const [newTodo, setNewTodo] = useState('');
-  const [email, setEmail] = useState('demo@example.com');
+  const [email, setEmail] = useState('test1@example.com');
   const [password, setPassword] = useState('demo123');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');

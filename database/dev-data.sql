@@ -1,11 +1,10 @@
 -- Development sample data for Todo App
--- This file is loaded only in development environment
 
 -- Insert additional test users
 INSERT INTO users (username, email, password_hash) VALUES 
-('testuser1', 'test1@example.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeGEDk/eGu2lGxMUG'), -- password: demo123
-('testuser2', 'test2@example.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeGEDk/eGu2lGxMUG'), -- password: demo123
-('john.doe', 'john.doe@example.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeGEDk/eGu2lGxMUG') -- password: demo123
+('testuser1', 'test1@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy'), -- password: demo123
+('testuser2', 'test2@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy'), -- password: demo123
+('john.doe', 'john.doe@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy') -- password: demo123
 ON CONFLICT (email) DO NOTHING;
 
 -- Get user IDs for sample data

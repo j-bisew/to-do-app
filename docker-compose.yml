@@ -1,4 +1,4 @@
-# Docker Compose configuration for Todo App microservices
+# Docker Compose configuration for Todo App microservices (Local build)
 
 services:
   # Frontend Service (React)
@@ -6,9 +6,6 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      # platforms:  # Commented out for faster local builds
-      #   - linux/amd64
-      #   - linux/arm64
     container_name: todo-frontend
     ports:
       - "3000:3000"
@@ -34,9 +31,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-      # platforms:  # Commented out for faster local builds
-      #   - linux/amd64
-      #   - linux/arm64
     container_name: todo-backend
     ports:
       - "5000:5000"
@@ -71,6 +65,27 @@ services:
       retries: 3
       start_period: 40s
 
+  # Notification Service
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: todo-notifications
+    environment:
+      - NODE_ENV=development
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - todo-network
+    volumes:
+      - ./notification-service:/app
+      - /app/node_modules
+
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
@@ -83,7 +98,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./database/dev-data.sql:/docker-entrypoint-initdb.d/02-dev-data.sql
     networks:
       - todo-network
     healthcheck:
@@ -110,30 +126,6 @@ services:
       retries: 5
       start_period: 30s
     command: redis-server --appendonly yes
-
-  # Notification Service (dodatkowy mikroserwis)
-  notification-service:
-    build:
-      context: ./notification-service
-      dockerfile: Dockerfile
-      # platforms:  # Commented out for faster local builds
-      #   - linux/amd64
-      #   - linux/arm64
-    container_name: todo-notifications
-    environment:
-      - NODE_ENV=development
-      - RABBITMQ_HOST=rabbitmq
-      - RABBITMQ_PORT=5672
-      - RABBITMQ_USER=${RABBITMQ_USER}
-      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      - todo-network
-    volumes:
-      - ./notification-service:/app
-      - /app/node_modules
 
   # RabbitMQ Message Queue
   rabbitmq:
