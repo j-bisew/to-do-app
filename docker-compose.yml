@@ -1,3 +1,5 @@
+# Docker Compose configuration for Todo App microservices
+
 services:
   # Frontend Service (React)
   frontend:
@@ -47,6 +49,10 @@ services:
       - DB_PASSWORD=${POSTGRES_PASSWORD}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
       - JWT_SECRET=${JWT_SECRET}
     depends_on:
       postgres:
