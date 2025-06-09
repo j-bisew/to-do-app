@@ -1,4 +1,3 @@
-# postgres.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,6 +37,8 @@ spec:
         volumeMounts:
         - name: postgres-storage
           mountPath: /var/lib/postgresql/data
+        - name: postgres-init-scripts
+          mountPath: /docker-entrypoint-initdb.d
         resources:
           requests:
             memory: "256Mi"
@@ -49,6 +50,9 @@ spec:
       - name: postgres-storage
         persistentVolumeClaim:
           claimName: postgres-pvc
+      - name: postgres-init-scripts
+        configMap:
+          name: postgres-init-scripts
 
 ---
 apiVersion: v1
