@@ -20,5 +20,8 @@ ENV NODE_ENV=development
 # Expose port
 EXPOSE 3000
 
+ENV BROWSER=none
+ENV CI=true
+
 # Start development server
 CMD ["npm", "start"]

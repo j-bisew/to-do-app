@@ -68,7 +68,7 @@ CREATE TRIGGER update_todos_updated_at
 
 -- Insert sample data (optional - for development)
 INSERT INTO users (username, email, password_hash) VALUES 
-('demo', 'demo@example.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeGEDk/eGu2lGxMUG') -- password: demo123
+('demo', 'demo@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy') -- password: demo123
 ON CONFLICT (email) DO NOTHING;
 
 -- Get the demo user ID

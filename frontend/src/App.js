@@ -245,7 +245,7 @@ function App() {
           {message && <div className="message">{message}</div>}
           
           <div className="demo-info">
-            <p>Demo account: demo@example.com / demo123</p>
+            <p>Demo account: test1@example.com / demo123</p>
           </div>
         </div>
       </div>
