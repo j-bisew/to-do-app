@@ -11,9 +11,13 @@ services:
       - "3000:3000"
     environment:
       - REACT_APP_API_URL=http://localhost:5000
+      - REACT_APP_KEYCLOAK_URL=http://localhost:8080
+      - REACT_APP_KEYCLOAK_REALM=todo-realm
+      - REACT_APP_KEYCLOAK_CLIENT_ID=todo-frontend
       - NODE_ENV=development
     depends_on:
       - backend
+      - keycloak
     networks:
       - todo-network
     volumes:
@@ -48,10 +52,18 @@ services:
       - RABBITMQ_USER=${RABBITMQ_USER}
       - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
       - JWT_SECRET=${JWT_SECRET}
+      - KEYCLOAK_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=todo-realm
+      - KEYCLOAK_CLIENT_ID=todo-backend
+      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
     networks:
       - todo-network
@@ -86,6 +98,40 @@ services:
       - ./notification-service:/app
       - /app/node_modules
 
+    # Keycloak Identity Provider
+  keycloak:
+    image: quay.io/keycloak/keycloak:22.0
+    container_name: todo-keycloak
+    environment:
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN_USER}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://postgres:5432/${KEYCLOAK_DB}
+      - KC_DB_USERNAME=${POSTGRES_USER}
+      - KC_DB_PASSWORD=${POSTGRES_PASSWORD}
+      - KC_HOSTNAME_STRICT=false
+      - KC_HOSTNAME_STRICT_HTTPS=false
+      - KC_HTTP_ENABLED=true
+      - KC_HEALTH_ENABLED=true
+      - KC_METRICS_ENABLED=true
+    ports:
+      - "8080:8080"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ./keycloak/realm-import:/opt/keycloak/data/import
+    command: start-dev --import-realm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - todo-network
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080;echo -e \"GET /health/ready HTTP/1.1\r\nhost: 127.0.0.1:8080\r\nConnection: close\r\n\r\n\" >&3;grep \"HTTP/1.1 200 OK\" <&3"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
@@ -100,6 +146,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql
       - ./database/dev-data.sql:/docker-entrypoint-initdb.d/02-dev-data.sql
+      - ./database/keycloak-init.sql:/docker-entrypoint-initdb.d/03-keycloak-init.sql
     networks:
       - todo-network
     healthcheck:
@@ -161,4 +208,6 @@ volumes:
   redis_data:
     driver: local
   rabbitmq_data:
+    driver: local
+  keycloak_data:
     driver: local

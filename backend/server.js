@@ -35,7 +35,7 @@ const redisClient = redis.createClient({
   retry_strategy: (options) => {
     if (options.error && options.error.code === 'ECONNREFUSED') {
       console.warn('Redis connection refused, continuing without cache');
-      return undefined; // Don't retry
+      return undefined;
     }
     return Math.min(options.attempt * 100, 3000);
   }
@@ -87,8 +87,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100
 });
 app.use(limiter);
 
@@ -127,10 +127,8 @@ const authenticateToken = async (req, res, next) => {
 // Health check endpoint
 app.get('/health', async (req, res) => {
   try {
-    // Check database connection
     await pool.query('SELECT 1');
     
-    // Check Redis connection
     const redisStatus = redisClient.isReady ? 'connected' : 'disconnected';
     
     res.status(200).json({
@@ -207,7 +205,6 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password required' });
     }
 
-    // Find user
     const result = await pool.query(
       'SELECT id, username, email, password_hash FROM users WHERE email = $1',
       [email]
@@ -219,7 +216,6 @@ app.post('/api/auth/login', async (req, res) => {
 
     const user = result.rows[0];
     
-    // Verify password
     const validPassword = await bcrypt.compare(password, user.password_hash);
     if (!validPassword) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -264,7 +260,6 @@ app.get('/api/todos', authenticateToken, async (req, res) => {
       [req.user.userId]
     );
 
-    // Cache the result for 5 minutes (if Redis is available)
     try {
       if (redisClient.isReady) {
         await redisClient.setEx(cacheKey, 300, JSON.stringify(result.rows));
@@ -297,7 +292,6 @@ app.post('/api/todos', authenticateToken, async (req, res) => {
 
     const newTodo = result.rows[0];
 
-    // Clear cache (if Redis is available)
     try {
       if (redisClient.isReady) {
         await redisClient.del(`todos:user:${req.user.userId}`);
@@ -306,7 +300,6 @@ app.post('/api/todos', authenticateToken, async (req, res) => {
       console.warn('Cache clear error:', cacheError.message);
     }
 
-    // Send notification
     if (rabbitChannel) {
       try {
         const notification = {
@@ -334,7 +327,6 @@ app.post('/api/todos', authenticateToken, async (req, res) => {
   }
 });
 
-// Update todo
 app.put('/api/todos/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -349,7 +341,6 @@ app.put('/api/todos/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Todo not found' });
     }
 
-    // Clear cache (if Redis is available)
     try {
       if (redisClient.isReady) {
         await redisClient.del(`todos:user:${req.user.userId}`);
@@ -365,7 +356,6 @@ app.put('/api/todos/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Delete todo
 app.delete('/api/todos/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -379,7 +369,6 @@ app.delete('/api/todos/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Todo not found' });
     }
 
-    // Clear cache (if Redis is available)
     try {
       if (redisClient.isReady) {
         await redisClient.del(`todos:user:${req.user.userId}`);
@@ -409,7 +398,6 @@ app.use((req, res) => {
 // Initialize connections and start server
 const startServer = async () => {
   try {
-    // Try to connect to Redis (non-blocking)
     try {
       await redisClient.connect();
       console.log('Connected to Redis');
@@ -417,14 +405,12 @@ const startServer = async () => {
       console.warn('Redis connection failed, continuing without cache:', redisError.message);
     }
 
-    // Connect to RabbitMQ (non-blocking)
     try {
       await connectRabbitMQ();
     } catch (rabbitError) {
       console.warn('RabbitMQ connection failed, continuing without notifications:', rabbitError.message);
     }
 
-    // Test database connection (required)
     await pool.query('SELECT NOW()');
     console.log('Connected to PostgreSQL');
 
@@ -437,7 +423,6 @@ const startServer = async () => {
   }
 };
 
-// Graceful shutdown
 const gracefulShutdown = async () => {
   console.log('Shutting down gracefully...');
   try {
