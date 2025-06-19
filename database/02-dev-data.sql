@@ -1,27 +1,38 @@
--- Development sample data for Todo App
+-- Development sample data for Todo App with Keycloak integration
+-- (Structure is already created in init.sql)
 
--- Insert additional test users
-INSERT INTO users (username, email, password_hash) VALUES 
-('testuser1', 'test1@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy'), -- password: demo123
-('testuser2', 'test2@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy'), -- password: demo123
-('john.doe', 'john.doe@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy') -- password: demo123
+-- Insert additional test users with proper roles
+INSERT INTO users (username, email, password_hash, role) VALUES 
+('testuser1', 'test1@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy', 'user'), -- password: demo123
+('testuser2', 'test2@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy', 'user'), -- password: demo123
+('john.doe', 'john.doe@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy', 'user') -- password: demo123
 ON CONFLICT (email) DO NOTHING;
 
--- Get user IDs for sample data
+-- Insert Keycloak-managed test users (these will be managed entirely by Keycloak)
+INSERT INTO users (username, email, password_hash, role, keycloak_id) VALUES 
+('keycloak_demo', 'demo_kc@example.com', 'keycloak-managed', 'user', 'keycloak-demo-user-id'),
+('keycloak_admin', 'admin_kc@example.com', 'keycloak-managed', 'admin', 'keycloak-admin-user-id')
+ON CONFLICT (email) DO NOTHING;
+
+-- Get user IDs and insert sample data
 DO $$
 DECLARE
     demo_user_id INTEGER;
     test1_user_id INTEGER;
     test2_user_id INTEGER;
     john_user_id INTEGER;
+    kc_demo_user_id INTEGER;
+    kc_admin_user_id INTEGER;
 BEGIN
     -- Get user IDs
     SELECT id INTO demo_user_id FROM users WHERE email = 'demo@example.com';
     SELECT id INTO test1_user_id FROM users WHERE email = 'test1@example.com';
     SELECT id INTO test2_user_id FROM users WHERE email = 'test2@example.com';
     SELECT id INTO john_user_id FROM users WHERE email = 'john.doe@example.com';
+    SELECT id INTO kc_demo_user_id FROM users WHERE email = 'demo_kc@example.com';
+    SELECT id INTO kc_admin_user_id FROM users WHERE email = 'admin_kc@example.com';
     
-    -- Sample todos for demo user
+    -- Sample todos for demo user (admin)
     IF demo_user_id IS NOT NULL THEN
         INSERT INTO todos (title, description, completed, priority, due_date, user_id) VALUES 
         ('Complete project documentation', 'Write comprehensive README and API documentation', false, 'high', CURRENT_DATE + INTERVAL '3 days', demo_user_id),
@@ -63,6 +74,23 @@ BEGIN
         ('Backup important files', 'Create backup of photos and documents', false, 'medium', CURRENT_DATE + INTERVAL '7 days', john_user_id)
         ON CONFLICT DO NOTHING;
     END IF;
+
+    -- Sample todos for Keycloak demo user
+    IF kc_demo_user_id IS NOT NULL THEN
+        INSERT INTO todos (title, description, completed, priority, due_date, user_id) VALUES 
+        ('Test Keycloak integration', 'Verify SSO login functionality', false, 'high', CURRENT_DATE + INTERVAL '2 days', kc_demo_user_id),
+        ('Configure PKCE', 'Set up Proof Key for Code Exchange', false, 'medium', CURRENT_DATE + INTERVAL '4 days', kc_demo_user_id)
+        ON CONFLICT DO NOTHING;
+    END IF;
+
+    -- Sample todos for Keycloak admin user
+    IF kc_admin_user_id IS NOT NULL THEN
+        INSERT INTO todos (title, description, completed, priority, due_date, user_id) VALUES 
+        ('Admin panel testing', 'Test all admin panel functionalities', false, 'high', CURRENT_DATE + INTERVAL '1 day', kc_admin_user_id),
+        ('User role management', 'Verify role-based access control', false, 'high', CURRENT_DATE + INTERVAL '2 days', kc_admin_user_id),
+        ('System monitoring setup', 'Configure monitoring for production', false, 'medium', CURRENT_DATE + INTERVAL '7 days', kc_admin_user_id)
+        ON CONFLICT DO NOTHING;
+    END IF;
     
     -- Additional categories for demo user
     IF demo_user_id IS NOT NULL THEN
@@ -89,39 +117,45 @@ BEGIN
         ('Testing', '#9c27b0', test2_user_id)
         ON CONFLICT DO NOTHING;
     END IF;
+
+    -- Create Keycloak mappings for all users
+    INSERT INTO user_keycloak_mapping (user_id, keycloak_user_id, keycloak_username, roles) VALUES
+    (demo_user_id, 'demo-user-id', 'demo', ARRAY['admin', 'user']),
+    (test1_user_id, 'test1-user-id', 'testuser1', ARRAY['user']),
+    (test2_user_id, 'test2-user-id', 'testuser2', ARRAY['user']),
+    (john_user_id, 'john-user-id', 'john.doe', ARRAY['user']),
+    (kc_demo_user_id, 'keycloak-demo-user-id', 'keycloak_demo', ARRAY['user']),
+    (kc_admin_user_id, 'keycloak-admin-user-id', 'keycloak_admin', ARRAY['admin', 'user'])
+    ON CONFLICT (keycloak_user_id) DO NOTHING;
     
 END $$;
 
--- Insert some additional test data for analytics
+-- Insert some additional test data for analytics (only for demo user to keep it simple)
 INSERT INTO todos (title, description, completed, priority, user_id, created_at) 
 SELECT 
     'Generated task ' || generate_series,
-    'This is a generated task for testing purposes',
-    (random() > 0.7), -- 30% chance of being completed
+    'This is a generated task for testing analytics',
+    (random() > 0.7),
     (ARRAY['low', 'medium', 'high'])[floor(random() * 3 + 1)],
-    (SELECT id FROM users WHERE email = 'demo@example.com'),
+    (SELECT id FROM users WHERE email = 'demo@example.com' LIMIT 1),
     CURRENT_TIMESTAMP - (random() * INTERVAL '30 days')
 FROM generate_series(1, 15)
-ON CONFLICT DO NOTHING;
+WHERE EXISTS (SELECT 1 FROM users WHERE email = 'demo@example.com');
 
--- Update some timestamps to simulate realistic usage
+-- Update some timestamps for realism
 UPDATE todos 
 SET updated_at = created_at + (random() * INTERVAL '5 days')
-WHERE user_id = (SELECT id FROM users WHERE email = 'demo@example.com');
+WHERE user_id = (SELECT id FROM users WHERE email = 'demo@example.com' LIMIT 1);
 
--- Add some overdue todos for testing
+-- Add some overdue todos
 UPDATE todos 
-SET due_date = CURRENT_DATE - INTERVAL '3 days'
+SET due_date = CURRENT_DATE - (floor(random() * 7) + 1)::integer
 WHERE title LIKE '%Generated task%' 
 AND random() > 0.8
 AND completed = false;
 
--- Create some todos with no due date
-UPDATE todos 
-SET due_date = NULL
-WHERE title LIKE '%Generated task%' 
-AND random() > 0.6;
-
+-- Update table statistics for better query performance
 ANALYZE users;
 ANALYZE todos;
 ANALYZE categories;
+ANALYZE user_keycloak_mapping;
