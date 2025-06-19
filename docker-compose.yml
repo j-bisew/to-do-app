@@ -1,7 +1,5 @@
-# Docker Compose configuration for Todo App microservices with Keycloak
-
 services:
-  # Frontend Service (React)
+  # Frontend Service
   frontend:
     build:
       context: ./frontend
@@ -30,7 +28,7 @@ services:
       retries: 3
       start_period: 40s
 
-  # Backend API Service (Node.js/Express)
+  # Backend API Service
   backend:
     build:
       context: ./backend
@@ -60,6 +58,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
       keycloak:
         condition: service_healthy
@@ -96,7 +96,7 @@ services:
       - ./notification-service:/app
       - /app/node_modules
 
-  # Keycloak Identity Provider
+  # Keycloak Identity Provider with auto-import
   keycloak:
     image: quay.io/keycloak/keycloak:22.0
     container_name: todo-keycloak
@@ -112,11 +112,15 @@ services:
       - KC_HTTP_ENABLED=true
       - KC_HEALTH_ENABLED=true
       - KC_METRICS_ENABLED=true
+      # Performance optimizations
+      - JAVA_OPTS_APPEND="-Dkeycloak.profile.feature.scripts=enabled -Dkeycloak.profile.feature.upload_scripts=enabled"
+      - KC_LOG_LEVEL=INFO
     ports:
       - "8080:8080"
     volumes:
       - keycloak_data:/opt/keycloak/data
-    command: start-dev
+      - ./keycloak:/opt/keycloak/data/import:ro
+    command: ["start-dev", "--import-realm"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -129,7 +133,7 @@ services:
       retries: 10
       start_period: 90s
 
-  # PostgreSQL Database (extended for Keycloak)
+  # PostgreSQL Database (shared for app and Keycloak)
   postgres:
     image: postgres:15-alpine
     container_name: todo-postgres
@@ -137,6 +141,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_MULTIPLE_DATABASES=${KEYCLOAK_DB}
     ports:
       - "5432:5432"
     volumes:
@@ -190,7 +195,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
-    user: "999:999"
 
 networks:
   todo-network:
