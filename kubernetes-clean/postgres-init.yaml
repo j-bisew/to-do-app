@@ -1,0 +1,246 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: todoapp-clean
+data:
+  01-init.sql: |
+    -- Users table
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Todos table
+    CREATE TABLE IF NOT EXISTS todos (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT '',
+        completed BOOLEAN DEFAULT FALSE,
+        priority VARCHAR(10) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
+        due_date DATE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Categories table (for future expansion)
+    CREATE TABLE IF NOT EXISTS categories (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        color VARCHAR(7) DEFAULT '#1976d2',
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Todo categories junction table
+    CREATE TABLE IF NOT EXISTS todo_categories (
+        todo_id INTEGER REFERENCES todos(id) ON DELETE CASCADE,
+        category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
+        PRIMARY KEY (todo_id, category_id)
+    );
+
+    -- Indexes for better performance
+    CREATE INDEX IF NOT EXISTS idx_todos_user_id ON todos(user_id);
+    CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_todos_completed ON todos(completed);
+    CREATE INDEX IF NOT EXISTS idx_todos_priority ON todos(priority);
+    CREATE INDEX IF NOT EXISTS idx_todos_due_date ON todos(due_date);
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+
+    -- Function to update updated_at timestamp
+    CREATE OR REPLACE FUNCTION update_updated_at_column()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        NEW.updated_at = CURRENT_TIMESTAMP;
+        RETURN NEW;
+    END;
+    $$ language 'plpgsql';
+
+    -- Triggers to automatically update updated_at
+    CREATE TRIGGER update_users_updated_at 
+        BEFORE UPDATE ON users 
+        FOR EACH ROW 
+        EXECUTE FUNCTION update_updated_at_column();
+
+    CREATE TRIGGER update_todos_updated_at 
+        BEFORE UPDATE ON todos 
+        FOR EACH ROW 
+        EXECUTE FUNCTION update_updated_at_column();
+
+    -- Insert sample data (optional - for development)
+    INSERT INTO users (username, email, password_hash) VALUES 
+    ('demo', 'demo@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy') -- password: demo123
+    ON CONFLICT (email) DO NOTHING;
+
+    -- Get the demo user ID
+    DO $$
+    DECLARE
+        demo_user_id INTEGER;
+    BEGIN
+        SELECT id INTO demo_user_id FROM users WHERE email = 'demo@example.com';
+        
+        IF demo_user_id IS NOT NULL THEN
+            INSERT INTO todos (title, description, priority, user_id) VALUES 
+            ('Welcome to Todo App', 'This is your first todo item. You can edit or delete it!', 'medium', demo_user_id),
+            ('Set up your profile', 'Customize your account settings', 'low', demo_user_id),
+            ('Explore features', 'Try creating, editing, and completing todos', 'high', demo_user_id)
+            ON CONFLICT DO NOTHING;
+            
+            INSERT INTO categories (name, color, user_id) VALUES 
+            ('Work', '#1976d2', demo_user_id),
+            ('Personal', '#dc004e', demo_user_id),
+            ('Shopping', '#388e3c', demo_user_id)
+            ON CONFLICT DO NOTHING;
+        END IF;
+    END $$;
+
+    -- Views for analytics (optional)
+    CREATE OR REPLACE VIEW user_todo_stats AS
+    SELECT 
+        u.id as user_id,
+        u.username,
+        COUNT(t.id) as total_todos,
+        COUNT(CASE WHEN t.completed = true THEN 1 END) as completed_todos,
+        COUNT(CASE WHEN t.completed = false THEN 1 END) as pending_todos,
+        COUNT(CASE WHEN t.due_date < CURRENT_DATE AND t.completed = false THEN 1 END) as overdue_todos
+    FROM users u
+    LEFT JOIN todos t ON u.id = t.user_id
+    GROUP BY u.id, u.username;
+
+    -- Grant permissions
+    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO todouser;
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO todouser;
+  02-dev-data.sql: |
+    -- Development sample data for Todo App
+
+    -- Insert additional test users
+    INSERT INTO users (username, email, password_hash) VALUES 
+    ('testuser1', 'test1@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy'), -- password: demo123
+    ('testuser2', 'test2@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy'), -- password: demo123
+    ('john.doe', 'john.doe@example.com', '$2a$12$ALj/ICOiI2Ma2yKobKHOUONENujsMFgi4BC3YMJryb424dbwwaACy') -- password: demo123
+    ON CONFLICT (email) DO NOTHING;
+
+    -- Get user IDs for sample data
+    DO $$
+    DECLARE
+        demo_user_id INTEGER;
+        test1_user_id INTEGER;
+        test2_user_id INTEGER;
+        john_user_id INTEGER;
+    BEGIN
+        -- Get user IDs
+        SELECT id INTO demo_user_id FROM users WHERE email = 'demo@example.com';
+        SELECT id INTO test1_user_id FROM users WHERE email = 'test1@example.com';
+        SELECT id INTO test2_user_id FROM users WHERE email = 'test2@example.com';
+        SELECT id INTO john_user_id FROM users WHERE email = 'john.doe@example.com';
+        
+        -- Sample todos for demo user
+        IF demo_user_id IS NOT NULL THEN
+            INSERT INTO todos (title, description, completed, priority, due_date, user_id) VALUES 
+            ('Complete project documentation', 'Write comprehensive README and API documentation', false, 'high', CURRENT_DATE + INTERVAL '3 days', demo_user_id),
+            ('Code review for backend API', 'Review authentication and validation logic', false, 'medium', CURRENT_DATE + INTERVAL '1 day', demo_user_id),
+            ('Setup CI/CD pipeline', 'Configure GitHub Actions for automated testing and deployment', false, 'medium', CURRENT_DATE + INTERVAL '5 days', demo_user_id),
+            ('Buy groceries', 'Milk, bread, eggs, vegetables', false, 'low', CURRENT_DATE + INTERVAL '2 days', demo_user_id),
+            ('Workout session', 'Gym workout - legs and cardio', true, 'medium', CURRENT_DATE - INTERVAL '1 day', demo_user_id),
+            ('Call mom', 'Weekly family check-in call', true, 'low', CURRENT_DATE - INTERVAL '2 days', demo_user_id),
+            ('Prepare presentation', 'Create slides for project demo', false, 'high', CURRENT_DATE + INTERVAL '7 days', demo_user_id),
+            ('Database optimization', 'Add indexes and optimize slow queries', false, 'medium', CURRENT_DATE + INTERVAL '10 days', demo_user_id)
+            ON CONFLICT DO NOTHING;
+        END IF;
+        
+        -- Sample todos for test1 user
+        IF test1_user_id IS NOT NULL THEN
+            INSERT INTO todos (title, description, completed, priority, due_date, user_id) VALUES 
+            ('Learn Kubernetes', 'Complete online course on Kubernetes fundamentals', false, 'high', CURRENT_DATE + INTERVAL '14 days', test1_user_id),
+            ('Morning jog', 'Daily exercise routine', true, 'low', CURRENT_DATE, test1_user_id),
+            ('Team meeting preparation', 'Prepare agenda and status updates', false, 'medium', CURRENT_DATE + INTERVAL '1 day', test1_user_id),
+            ('Clean apartment', 'Weekly cleaning routine', false, 'low', CURRENT_DATE + INTERVAL '3 days', test1_user_id)
+            ON CONFLICT DO NOTHING;
+        END IF;
+        
+        -- Sample todos for test2 user
+        IF test2_user_id IS NOT NULL THEN
+            INSERT INTO todos (title, description, completed, priority, due_date, user_id) VALUES 
+            ('Docker security audit', 'Review and update Dockerfile security practices', false, 'high', CURRENT_DATE + INTERVAL '5 days', test2_user_id),
+            ('Update dependencies', 'Check for security updates in package.json', false, 'medium', CURRENT_DATE + INTERVAL '2 days', test2_user_id),
+            ('Write unit tests', 'Increase test coverage for critical components', false, 'high', CURRENT_DATE + INTERVAL '6 days', test2_user_id)
+            ON CONFLICT DO NOTHING;
+        END IF;
+        
+        -- Sample todos for john user  
+        IF john_user_id IS NOT NULL THEN
+            INSERT INTO todos (title, description, completed, priority, due_date, user_id) VALUES 
+            ('Plan vacation', 'Research destinations and book flights', false, 'low', CURRENT_DATE + INTERVAL '30 days', john_user_id),
+            ('Dentist appointment', 'Annual dental checkup', false, 'medium', CURRENT_DATE + INTERVAL '14 days', john_user_id),
+            ('Read technical book', 'Finish "Clean Code" by Robert Martin', false, 'low', CURRENT_DATE + INTERVAL '21 days', john_user_id),
+            ('Backup important files', 'Create backup of photos and documents', false, 'medium', CURRENT_DATE + INTERVAL '7 days', john_user_id)
+            ON CONFLICT DO NOTHING;
+        END IF;
+        
+        -- Additional categories for demo user
+        IF demo_user_id IS NOT NULL THEN
+            INSERT INTO categories (name, color, user_id) VALUES 
+            ('Development', '#2196f3', demo_user_id),
+            ('Health', '#4caf50', demo_user_id),
+            ('Learning', '#9c27b0', demo_user_id),
+            ('Household', '#ff9800', demo_user_id),
+            ('Finance', '#f44336', demo_user_id)
+            ON CONFLICT DO NOTHING;
+        END IF;
+        
+        -- Sample categories for other users
+        IF test1_user_id IS NOT NULL THEN
+            INSERT INTO categories (name, color, user_id) VALUES 
+            ('Fitness', '#4caf50', test1_user_id),
+            ('Career', '#2196f3', test1_user_id)
+            ON CONFLICT DO NOTHING;
+        END IF;
+        
+        IF test2_user_id IS NOT NULL THEN
+            INSERT INTO categories (name, color, user_id) VALUES 
+            ('Security', '#f44336', test2_user_id),
+            ('Testing', '#9c27b0', test2_user_id)
+            ON CONFLICT DO NOTHING;
+        END IF;
+        
+    END $$;
+
+    -- Insert some additional test data for analytics
+    INSERT INTO todos (title, description, completed, priority, user_id, created_at) 
+    SELECT 
+        'Generated task ' || generate_series,
+        'This is a generated task for testing purposes',
+        (random() > 0.7), -- 30% chance of being completed
+        (ARRAY['low', 'medium', 'high'])[floor(random() * 3 + 1)],
+        (SELECT id FROM users WHERE email = 'demo@example.com'),
+        CURRENT_TIMESTAMP - (random() * INTERVAL '30 days')
+    FROM generate_series(1, 15)
+    ON CONFLICT DO NOTHING;
+
+    -- Update some timestamps to simulate realistic usage
+    UPDATE todos 
+    SET updated_at = created_at + (random() * INTERVAL '5 days')
+    WHERE user_id = (SELECT id FROM users WHERE email = 'demo@example.com');
+
+    -- Add some overdue todos for testing
+    UPDATE todos 
+    SET due_date = CURRENT_DATE - INTERVAL '3 days'
+    WHERE title LIKE '%Generated task%' 
+    AND random() > 0.8
+    AND completed = false;
+
+    -- Create some todos with no due date
+    UPDATE todos 
+    SET due_date = NULL
+    WHERE title LIKE '%Generated task%' 
+    AND random() > 0.6;
+
+    ANALYZE users;
+    ANALYZE todos;
+    ANALYZE categories;
