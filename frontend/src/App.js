@@ -22,56 +22,53 @@ function App() {
   const [message, setMessage] = useState('');
   const [priority, setPriority] = useState('medium');
   const [keycloakInitialized, setKeycloakInitialized] = useState(false);
-  const [authMethod, setAuthMethod] = useState('legacy'); // 'keycloak' or 'legacy'
   const [showAdmin, setShowAdmin] = useState(false);
   const [adminData, setAdminData] = useState({ users: [], stats: {} });
-  
-  // Legacy auth states
-  const [email, setEmail] = useState('demo@example.com');
-  const [password, setPassword] = useState('demo123');
-  const [registerMode, setRegisterMode] = useState(false);
-  const [username, setUsername] = useState('');
+  const [authError, setAuthError] = useState('');
 
   // Initialize Keycloak on startup
   useEffect(() => {
     const initKeycloak = async () => {
       try {
+        console.log('🔧 Initializing Keycloak...');
         const authenticated = await keycloak.init({
           onLoad: 'check-sso',
           silentCheckSsoRedirectUri: window.location.origin + '/silent-check-sso.html',
-          pkceMethod: 'S256'
+          pkceMethod: 'S256' // Enable PKCE
         });
 
         setKeycloakInitialized(true);
 
         if (authenticated) {
-          console.log('✅ Keycloak authenticated');
-          setAuthMethod('keycloak');
+          console.log('✅ User authenticated with Keycloak');
           await loadKeycloakUser();
           await fetchTodos();
         } else {
-          console.log('🔓 Not authenticated with Keycloak, trying legacy auth');
-          tryLegacyAuth();
+          console.log('🔓 User not authenticated');
+          setAuthError('');
         }
+
+        // Setup token refresh
+        setInterval(() => {
+          keycloak.updateToken(70).then((refreshed) => {
+            if (refreshed) {
+              console.log('🔄 Token refreshed');
+            }
+          }).catch(() => {
+            console.log('❌ Failed to refresh token');
+            setAuthError('Session expired. Please login again.');
+          });
+        }, 60000);
+
       } catch (error) {
-        console.warn('⚠️ Keycloak initialization failed:', error);
+        console.error('❌ Keycloak initialization failed:', error);
         setKeycloakInitialized(true);
-        tryLegacyAuth();
+        setAuthError('Failed to initialize authentication. Please refresh the page.');
       }
     };
 
     initKeycloak();
   }, []);
-
-  const tryLegacyAuth = () => {
-    const token = localStorage.getItem('token');
-    const userData = localStorage.getItem('user');
-    if (token && userData) {
-      setUser(JSON.parse(userData));
-      setAuthMethod('legacy');
-      fetchTodos();
-    }
-  };
 
   const loadKeycloakUser = async () => {
     try {
@@ -87,116 +84,51 @@ function App() {
         roles: roles,
         isAdmin: roles.includes('admin')
       });
+
+      console.log('👤 User loaded:', userProfile.username, 'Roles:', roles);
     } catch (error) {
       console.error('Failed to load user profile:', error);
+      setAuthError('Failed to load user profile');
     }
   };
 
-  // Keycloak login
+  // Login with Keycloak
   const loginWithKeycloak = () => {
+    setAuthError('');
     keycloak.login({
       redirectUri: window.location.origin
     });
   };
 
-  // Legacy login
-  const legacyLogin = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
-      });
-
-      const data = await response.json();
-      
-      if (response.ok) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        setUser({ ...data.user, isAdmin: data.user.role === 'admin' });
-        setAuthMethod('legacy');
-        setMessage('Logged in successfully!');
-        fetchTodos();
-      } else {
-        setMessage('Error: ' + data.error);
-      }
-    } catch (error) {
-      setMessage('Connection error. Is backend running?');
-    }
-    setLoading(false);
-  };
-
-  // Legacy register
-  const legacyRegister = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, email, password })
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        setUser({ ...data.user, isAdmin: false });
-        setAuthMethod('legacy');
-        setMessage('Registered successfully!');
-        fetchTodos();
-      } else {
-        setMessage('Error: ' + data.error);
-      }
-    } catch (error) {
-      setMessage('Connection error.');
-    }
-    setLoading(false);
+  // Register with Keycloak
+  const registerWithKeycloak = () => {
+    setAuthError('');
+    keycloak.register({
+      redirectUri: window.location.origin
+    });
   };
 
   // Logout
   const logout = () => {
-    if (authMethod === 'keycloak') {
-      keycloak.logout({
-        redirectUri: window.location.origin
-      });
-    } else {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      setUser(null);
-      setTodos([]);
-      setMessage('Logged out');
-    }
+    keycloak.logout({
+      redirectUri: window.location.origin
+    });
   };
 
   // Get auth headers with token refresh
   const getAuthHeaders = async () => {
-    console.log('🔍 getAuthHeaders - authMethod:', authMethod);
-    console.log('🔍 keycloak.authenticated:', keycloak.authenticated);
-    console.log('🔍 keycloak.token exists:', !!keycloak.token);
-    
-    if (authMethod === 'keycloak' && keycloak.authenticated) {
+    if (!keycloak.authenticated) {
+      throw new Error('Not authenticated');
+    }
+
+    try {
       // Refresh token if it expires soon (within 30 seconds)
-      try {
-        await keycloak.updateToken(30);
-        console.log('✅ Token refreshed, token:', keycloak.token ? 'EXISTS' : 'NULL');
-        return { 'Authorization': `Bearer ${keycloak.token}` };
-      } catch (error) {
-        console.error('❌ Failed to refresh token:', error);
-        // Token refresh failed, redirect to login
-        keycloak.login();
-        return {};
-      }
-    } else if (authMethod === 'legacy') {
-      const token = localStorage.getItem('token');
-      console.log('🔍 Legacy token:', token ? 'EXISTS' : 'NULL');
-      return token ? { 'Authorization': `Bearer ${token}` } : {};
-    } else {
-      console.log('❌ No valid auth method');
-      return {};
+      await keycloak.updateToken(30);
+      return { 'Authorization': `Bearer ${keycloak.token}` };
+    } catch (error) {
+      console.error('❌ Failed to refresh token:', error);
+      setAuthError('Session expired. Please login again.');
+      throw error;
     }
   };
 
@@ -210,11 +142,14 @@ function App() {
 
       if (response.ok) {
         const data = await response.json();
-        setTodos(Array.isArray(data) ? data : data.todos || []);
+        setTodos(Array.isArray(data) ? data : []);
+      } else if (response.status === 401 || response.status === 403) {
+        setAuthError('Authentication failed. Please login again.');
       } else {
         setMessage('Failed to load todos');
       }
     } catch (error) {
+      console.error('Error fetching todos:', error);
       setMessage('Connection error');
     }
   };
@@ -224,11 +159,9 @@ function App() {
     e.preventDefault();
     if (!newTodo.trim()) return;
 
-    console.log('🚀 Adding todo...');
     setLoading(true);
     try {
       const headers = await getAuthHeaders();
-      console.log('📤 Request headers:', headers);
       
       const response = await fetch(`${API_URL}/api/todos`, {
         method: 'POST',
@@ -243,12 +176,12 @@ function App() {
         })
       });
 
-      console.log('📥 Response status:', response.status);
-      
       if (response.ok) {
         setNewTodo('');
         setMessage('Todo added!');
         fetchTodos();
+      } else if (response.status === 401 || response.status === 403) {
+        setAuthError('Authentication failed. Please login again.');
       } else {
         const errorData = await response.text();
         console.error('❌ Response error:', errorData);
@@ -264,11 +197,12 @@ function App() {
   // Toggle todo completion
   const toggleTodo = async (todo) => {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_URL}/api/todos/${todo.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          ...getAuthHeaders()
+          ...headers
         },
         body: JSON.stringify({
           ...todo,
@@ -278,6 +212,8 @@ function App() {
 
       if (response.ok) {
         fetchTodos();
+      } else if (response.status === 401 || response.status === 403) {
+        setAuthError('Authentication failed. Please login again.');
       }
     } catch (error) {
       setMessage('Connection error');
@@ -289,14 +225,17 @@ function App() {
     if (!window.confirm('Delete this todo?')) return;
 
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_URL}/api/todos/${id}`, {
         method: 'DELETE',
-        headers: getAuthHeaders()
+        headers
       });
 
       if (response.ok) {
         setMessage('Todo deleted!');
         fetchTodos();
+      } else if (response.status === 401 || response.status === 403) {
+        setAuthError('Authentication failed. Please login again.');
       }
     } catch (error) {
       setMessage('Connection error');
@@ -305,18 +244,21 @@ function App() {
 
   // Load admin data
   const loadAdminData = async () => {
-    if (!user?.isAdmin && !user?.roles?.includes('admin')) return;
+    if (!user?.isAdmin) return;
 
     try {
+      const headers = await getAuthHeaders();
       const [usersResponse, statsResponse] = await Promise.all([
-        fetch(`${API_URL}/api/admin/users`, { headers: getAuthHeaders() }),
-        fetch(`${API_URL}/api/admin/stats`, { headers: getAuthHeaders() })
+        fetch(`${API_URL}/api/admin/users`, { headers }),
+        fetch(`${API_URL}/api/admin/stats`, { headers })
       ]);
 
       if (usersResponse.ok && statsResponse.ok) {
         const users = await usersResponse.json();
         const stats = await statsResponse.json();
         setAdminData({ users: Array.isArray(users) ? users : [], stats });
+      } else if (usersResponse.status === 401 || usersResponse.status === 403) {
+        setAuthError('Admin access denied. Please login again.');
       }
     } catch (error) {
       setMessage('Failed to load admin data');
@@ -326,11 +268,12 @@ function App() {
   // Change user role (admin only)
   const changeUserRole = async (userId, newRole) => {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_URL}/api/admin/users/${userId}/role`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          ...getAuthHeaders()
+          ...headers
         },
         body: JSON.stringify({ role: newRole })
       });
@@ -338,6 +281,8 @@ function App() {
       if (response.ok) {
         setMessage(`User role updated to ${newRole}`);
         loadAdminData();
+      } else if (response.status === 401 || response.status === 403) {
+        setAuthError('Admin access denied. Please login again.');
       } else {
         setMessage('Failed to update user role');
       }
@@ -349,7 +294,7 @@ function App() {
   // Show admin panel
   const toggleAdminPanel = () => {
     setShowAdmin(!showAdmin);
-    if (!showAdmin && (user?.isAdmin || user?.roles?.includes('admin'))) {
+    if (!showAdmin && user?.isAdmin) {
       loadAdminData();
     }
   };
@@ -362,13 +307,24 @@ function App() {
     }
   }, [message]);
 
+  // Show auth error temporarily
+  useEffect(() => {
+    if (authError) {
+      const timer = setTimeout(() => setAuthError(''), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [authError]);
+
   // Loading state
   if (!keycloakInitialized) {
     return (
       <div className="app">
         <div className="container">
           <h1>📝 Todo App</h1>
-          <h2>Loading...</h2>
+          <h2>Initializing authentication...</h2>
+          <div style={{ textAlign: 'center', marginTop: '20px' }}>
+            <div className="spinner"></div>
+          </div>
         </div>
       </div>
     );
@@ -382,82 +338,80 @@ function App() {
           <h1>📝 Todo App</h1>
           <h2>Microservices Project with Keycloak</h2>
           
-          {/* Keycloak Login Button */}
-          <div className="login-form">
-            <h3>Login with Keycloak (Recommended)</h3>
-            <button 
-              onClick={loginWithKeycloak}
-              className="keycloak-btn"
-              style={{
-                width: '100%',
-                padding: '12px',
-                background: '#1976d2',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                fontSize: '16px',
-                cursor: 'pointer',
-                marginBottom: '20px'
-              }}
-            >
-              🔐 Login with Keycloak
-            </button>
-            
-            <div style={{ textAlign: 'center', margin: '20px 0', color: '#666' }}>
-              OR
+          {authError && (
+            <div className="error-message" style={{
+              background: '#ffebee',
+              color: '#c62828',
+              padding: '12px',
+              borderRadius: '6px',
+              margin: '20px 0',
+              textAlign: 'center',
+              border: '1px solid #ffcdd2'
+            }}>
+              {authError}
             </div>
+          )}
 
-            {/* Legacy Login Form */}
-            <h3>Legacy Login</h3>
-            <form onSubmit={registerMode ? legacyRegister : legacyLogin}>
-              {registerMode && (
-                <input
-                  type="text"
-                  placeholder="Username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  required
-                />
-              )}
-              <input
-                type="email"
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-              <input
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-              <button type="submit" disabled={loading}>
-                {loading ? (registerMode ? 'Registering...' : 'Logging in...') : (registerMode ? 'Register' : 'Login')}
+          <div className="auth-section">
+            <h3>🔐 Secure Authentication with Keycloak</h3>
+            <p style={{ textAlign: 'center', color: '#666', marginBottom: '30px' }}>
+              Experience modern Single Sign-On with PKCE security
+            </p>
+            
+            <div className="auth-buttons" style={{ display: 'flex', gap: '15px', marginBottom: '30px' }}>
+              <button 
+                onClick={loginWithKeycloak}
+                style={{
+                  flex: 1,
+                  padding: '15px',
+                  background: '#1976d2',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                🔑 Login
               </button>
-              <p style={{ marginTop: '10px' }}>
-                {registerMode ? 'Already have an account?' : "Don't have an account?"}{' '}
-                <button 
-                  type="button" 
-                  onClick={() => setRegisterMode(!registerMode)} 
-                  style={{ color: 'blue', background: 'none', border: 'none', cursor: 'pointer' }}
-                >
-                  {registerMode ? 'Login' : 'Register'}
-                </button>
-              </p>
-            </form>
+              
+              <button 
+                onClick={registerWithKeycloak}
+                style={{
+                  flex: 1,
+                  padding: '15px',
+                  background: '#388e3c',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                ✨ Register
+              </button>
+            </div>
           </div>
 
           {message && <div className="message">{message}</div>}
           
           <div className="demo-info">
-            <p><strong>Keycloak Users:</strong></p>
-            <p>Admin: admin / admin123</p>
-            <p>User: demo / demo123</p>
-            <br />
-            <p><strong>Legacy Users:</strong></p>
-            <p>demo@example.com / demo123</p>
+            <h4>🎯 Project Features</h4>
+            <ul style={{ textAlign: 'left', margin: '15px 0' }}>
+              <li>✅ <strong>Keycloak SSO</strong> - Secure authentication</li>
+              <li>✅ <strong>PKCE Security</strong> - Modern OAuth2 flow</li>
+              <li>✅ <strong>Role-based Access</strong> - User/Admin roles</li>
+              <li>✅ <strong>Admin Panel</strong> - User management</li>
+              <li>✅ <strong>Microservices</strong> - Scalable architecture</li>
+              <li>✅ <strong>Real-time</strong> - Live notifications</li>
+            </ul>
+            
+            <div style={{ marginTop: '20px', fontSize: '14px', color: '#666' }}>
+              <p><strong>🧪 Test Accounts:</strong></p>
+              <p>Create your own account or use admin/admin123</p>
+            </div>
           </div>
         </div>
       </div>
@@ -471,109 +425,134 @@ function App() {
         <header className="header">
           <h1>📝 Todo App</h1>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span>Welcome, {user.username || user.firstName || 'User'}!</span>
-            <span style={{ fontSize: '12px', color: '#666' }}>
-              ({authMethod}) {user.isAdmin || user.roles?.includes('admin') ? '👑 Admin' : '👤 User'}
-            </span>
-            {(user.isAdmin || user.roles?.includes('admin')) && (
+            <div className="user-info">
+              <span>Welcome, <strong>{user.firstName || user.username}!</strong></span>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                🔐 Keycloak {user.isAdmin ? '👑 Admin' : '👤 User'}
+              </div>
+            </div>
+            {user.isAdmin && (
               <button 
                 onClick={toggleAdminPanel}
                 style={{
                   background: showAdmin ? '#e74c3c' : '#f39c12',
                   color: 'white',
                   border: 'none',
-                  padding: '6px 12px',
+                  padding: '8px 12px',
                   borderRadius: '4px',
                   fontSize: '12px',
                   cursor: 'pointer'
                 }}
               >
-                {showAdmin ? 'Hide Admin' : 'Admin Panel'}
+                {showAdmin ? 'Hide Admin' : '⚡ Admin Panel'}
               </button>
             )}
             <button onClick={logout} className="logout-btn">Logout</button>
           </div>
         </header>
 
+        {authError && (
+          <div className="error-message" style={{
+            background: '#ffebee',
+            color: '#c62828',
+            padding: '12px',
+            borderRadius: '6px',
+            margin: '20px 0',
+            textAlign: 'center',
+            border: '1px solid #ffcdd2'
+          }}>
+            {authError}
+          </div>
+        )}
+
         {message && <div className="message">{message}</div>}
 
         {/* Admin Panel */}
-        {showAdmin && (user.isAdmin || user.roles?.includes('admin')) && (
+        {showAdmin && user.isAdmin && (
           <div className="admin-panel" style={{
-            background: '#f8f9fa',
-            border: '2px solid #e9ecef',
-            borderRadius: '8px',
-            padding: '20px',
-            marginBottom: '30px'
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: 'white',
+            border: '2px solid #5a67d8',
+            borderRadius: '12px',
+            padding: '25px',
+            marginBottom: '30px',
+            boxShadow: '0 4px 15px rgba(0,0,0,0.1)'
           }}>
-            <h3>👑 Admin Panel</h3>
+            <h3 style={{ color: 'white', marginBottom: '20px' }}>👑 Admin Control Panel</h3>
             
             {/* System Stats */}
-            <div className="admin-stats" style={{ marginBottom: '20px' }}>
-              <h4>System Statistics</h4>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
-                <div style={{ background: 'white', padding: '10px', borderRadius: '4px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#3498db' }}>
+            <div className="admin-stats" style={{ marginBottom: '25px' }}>
+              <h4 style={{ color: 'white' }}>📊 System Statistics</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px' }}>
+                <div style={{ background: 'rgba(255,255,255,0.2)', padding: '15px', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#fff' }}>
                     {adminData.stats.total_users || 0}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#666' }}>Total Users</div>
+                  <div style={{ fontSize: '12px', color: '#e2e8f0' }}>Total Users</div>
                 </div>
-                <div style={{ background: 'white', padding: '10px', borderRadius: '4px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#27ae60' }}>
+                <div style={{ background: 'rgba(255,255,255,0.2)', padding: '15px', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#fff' }}>
                     {adminData.stats.total_todos || 0}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#666' }}>Total Todos</div>
+                  <div style={{ fontSize: '12px', color: '#e2e8f0' }}>Total Todos</div>
                 </div>
-                <div style={{ background: 'white', padding: '10px', borderRadius: '4px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#e74c3c' }}>
+                <div style={{ background: 'rgba(255,255,255,0.2)', padding: '15px', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#fff' }}>
                     {adminData.stats.pending_todos || 0}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#666' }}>Pending</div>
+                  <div style={{ fontSize: '12px', color: '#e2e8f0' }}>Pending</div>
                 </div>
-                <div style={{ background: 'white', padding: '10px', borderRadius: '4px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#f39c12' }}>
+                <div style={{ background: 'rgba(255,255,255,0.2)', padding: '15px', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#fff' }}>
                     {adminData.stats.completed_todos || 0}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#666' }}>Completed</div>
+                  <div style={{ fontSize: '12px', color: '#e2e8f0' }}>Completed</div>
                 </div>
               </div>
             </div>
 
             {/* Users Management */}
             <div className="users-management">
-              <h4>Users Management</h4>
-              <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+              <h4 style={{ color: 'white' }}>👥 User Management</h4>
+              <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
                 {adminData.users.map(u => (
-                  <div key={u.id || u.user_id} style={{
+                  <div key={u.id} style={{
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    padding: '8px',
-                    margin: '4px 0',
-                    background: 'white',
-                    borderRadius: '4px',
+                    padding: '12px',
+                    margin: '8px 0',
+                    background: 'rgba(255,255,255,0.15)',
+                    borderRadius: '8px',
                     fontSize: '14px'
                   }}>
                     <div>
-                      <strong>{u.username}</strong> ({u.email}) 
-                      <span style={{ color: '#666', marginLeft: '8px' }}>
-                        {u.total_todos || 0} todos
-                      </span>
+                      <strong style={{ color: 'white' }}>{u.username}</strong> 
+                      <span style={{ color: '#e2e8f0' }}> ({u.email})</span>
+                      <div style={{ fontSize: '12px', color: '#cbd5e0' }}>
+                        {u.total_todos || 0} todos • Joined {new Date(u.created_at).toLocaleDateString()}
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                       <span style={{
-                        padding: '2px 8px',
+                        padding: '4px 8px',
                         borderRadius: '4px',
                         fontSize: '12px',
-                        background: (u.role || 'user') === 'admin' ? '#e74c3c' : '#3498db',
+                        background: u.role === 'admin' ? '#e74c3c' : '#3498db',
                         color: 'white'
                       }}>
-                        {u.role || 'user'}
+                        {u.role === 'admin' ? '👑 Admin' : '👤 User'}
                       </span>
                       <select
                         value={u.role || 'user'}
-                        onChange={(e) => changeUserRole(u.id || u.user_id, e.target.value)}
-                        style={{ fontSize: '12px', padding: '2px' }}
+                        onChange={(e) => changeUserRole(u.id, e.target.value)}
+                        style={{ 
+                          fontSize: '12px', 
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          border: 'none',
+                          background: 'white'
+                        }}
                       >
                         <option value="user">User</option>
                         <option value="admin">Admin</option>
@@ -622,7 +601,10 @@ function App() {
 
         <div className="todos">
           {todos.length === 0 ? (
-            <p>No todos yet. Add your first todo above!</p>
+            <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+              <h3>🎯 No todos yet!</h3>
+              <p>Add your first todo above to get started.</p>
+            </div>
           ) : (
             todos.map(todo => (
               <div key={todo.id} className={`todo-item ${todo.completed ? 'completed' : ''}`}>
@@ -634,7 +616,7 @@ function App() {
                   />
                   <span className="todo-title">
                     {todo.title}
-                    {todo.owner_username && (
+                    {todo.owner_username && todo.owner_username !== user.username && (
                       <span style={{ fontSize: '12px', color: '#666', marginLeft: '8px' }}>
                         (by {todo.owner_username})
                       </span>

@@ -1,5 +1,7 @@
+# Docker Compose configuration for Todo App microservices with Keycloak
+
 services:
-  # Frontend Service
+  # Frontend Service (React)
   frontend:
     build:
       context: ./frontend
@@ -28,7 +30,7 @@ services:
       retries: 3
       start_period: 40s
 
-  # Backend API Service
+  # Backend API Service (Node.js/Express)
   backend:
     build:
       context: ./backend
@@ -96,7 +98,7 @@ services:
       - ./notification-service:/app
       - /app/node_modules
 
-  # Keycloak Identity Provider with auto-import
+  # Keycloak Identity Provider - TRY MINIMAL IMPORT
   keycloak:
     image: quay.io/keycloak/keycloak:22.0
     container_name: todo-keycloak
@@ -112,15 +114,13 @@ services:
       - KC_HTTP_ENABLED=true
       - KC_HEALTH_ENABLED=true
       - KC_METRICS_ENABLED=true
-      # Performance optimizations
-      - JAVA_OPTS_APPEND="-Dkeycloak.profile.feature.scripts=enabled -Dkeycloak.profile.feature.upload_scripts=enabled"
       - KC_LOG_LEVEL=INFO
     ports:
       - "8080:8080"
     volumes:
       - keycloak_data:/opt/keycloak/data
       - ./keycloak:/opt/keycloak/data/import:ro
-    command: ["start-dev", "--import-realm"]
+    command: ["start-dev"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -141,7 +141,6 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_MULTIPLE_DATABASES=${KEYCLOAK_DB}
     ports:
       - "5432:5432"
     volumes:
@@ -195,6 +194,26 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
+
+  # FALLBACK: Manual Keycloak setup if import fails
+  keycloak-setup:
+    image: curlimages/curl:latest
+    container_name: keycloak-setup
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    networks:
+      - todo-network
+    command: >
+      sh -c "
+        echo 'Waiting for Keycloak to be fully ready...';
+        sleep 10;
+        echo 'Testing Keycloak API...';
+        curl -f http://keycloak:8080/realms/master || echo 'Keycloak not ready yet';
+        echo 'Keycloak manual setup would go here if needed';
+        echo 'Check http://localhost:8080/admin to configure manually';
+      "
+    restart: "no"
 
 networks:
   todo-network:
