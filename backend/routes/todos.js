@@ -10,9 +10,14 @@ router.get('/', keycloakAuth, async (req, res) => {
   try {
     const userId = req.user.dbUserId;
     const isAdmin = req.user.isAdmin;
+    const viewAll = req.query.viewAll === 'true'; // Query parameter to control view
+
+    console.log(`📊 Todo request - User: ${req.user.username}, Admin: ${isAdmin}, ViewAll: ${viewAll}`);
 
     let query, params;
-    if (isAdmin) {
+    
+    // Admin can choose between their todos or all todos
+    if (isAdmin && viewAll) {
       query = `
         SELECT t.*, u.username as owner_username, u.email as owner_email 
         FROM todos t 
@@ -20,12 +25,16 @@ router.get('/', keycloakAuth, async (req, res) => {
         ORDER BY t.created_at DESC
       `;
       params = [];
+      console.log('👑 Admin viewing all todos');
     } else {
+      // Default: show only user's todos (both regular users and admins)
       query = 'SELECT * FROM todos WHERE user_id = $1 ORDER BY created_at DESC';
       params = [userId];
+      console.log(`👤 Viewing personal todos for user: ${userId}`);
     }
 
     const result = await pool.query(query, params);
+    console.log(`✅ Returning ${result.rows.length} todos`);
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching todos:', error);
